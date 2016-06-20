@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <meta charset="UTF-8">
+    <title>webmagic-csdnblog by liyifeng1994</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" type="text/css" href="stylesheets/normalize.css" media="screen">
+    <link href='https://fonts.googleapis.com/css?family=Open+Sans:400,700' rel='stylesheet' type='text/css'>
+    <link rel="stylesheet" type="text/css" href="stylesheets/stylesheet.css" media="screen">
+    <link rel="stylesheet" type="text/css" href="stylesheets/github-light.css" media="screen">
+  </head>
+  <body>
+    <section class="page-header">
+      <h1 class="project-name">webmagic-csdnblog</h1>
+      <h2 class="project-tagline">基于WebMagic写的一个csdn博客小爬虫</h2>
+      <a href="https://github.com/liyifeng1994/webmagic-csdnblog" class="btn">View on GitHub</a>
+      <a href="https://github.com/liyifeng1994/webmagic-csdnblog/zipball/master" class="btn">Download .zip</a>
+      <a href="https://github.com/liyifeng1994/webmagic-csdnblog/tarball/master" class="btn">Download .tar.gz</a>
+    </section>
+
+    <section class="main-content">
+      <h1>
+<a id="webmagic-csdnblog" class="anchor" href="#webmagic-csdnblog" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>webmagic-csdnblog</h1>
+
+<p>基于WebMagic写的一个csdn博客小爬虫</p>
+
+<p>博客地址：
+<a href="http://blog.csdn.net/qq598535550/article/details/51287630">http://blog.csdn.net/qq598535550/article/details/51287630</a></p>
+
+<hr>
+
+<p>最近有点无聊，想研究一下爬虫，说到爬虫，很多人第一时间想到的是python。但是这次我选择了室友推荐的java爬虫框架<a href="http://webmagic.io">WebMagic</a>。该框架容易上手，可定制可扩展，非常适合想用java做爬虫的小伙伴们。先看一下<a href="http://webmagic.io/docs/zh/">官方教程</a>，里面写得很详细，也有不少参考案例。</p>
+
+<hr>
+
+<p>暂时还想不到有什么数据值得爬取，先拿csdn博客来练练手。
+小爬虫能抓取指定用户的所有文章的关键信息，包括文章id，标题，标签，分类，阅读人数，评论人数，是否原创。并且把数据保存到数据库中。
+<img src="http://img.blog.csdn.net/20160430201323660" alt="文章ID">
+<img src="http://img.blog.csdn.net/20160430200254021" alt="文章的关键信息"></p>
+
+<hr>
+
+<p><strong>数据库表的设计及sql</strong></p>
+
+<p><img src="http://img.blog.csdn.net/20160430200621238" alt="数据库表的设计"></p>
+
+<pre><code>CREATE TABLE `csdnblog` (
+  `key` int(11) unsigned NOT NULL AUTO_INCREMENT,
+  `id` int(11) unsigned NOT NULL,
+  `title` varchar(255) NOT NULL,
+  `date` varchar(16) DEFAULT NULL,
+  `tags` varchar(255) DEFAULT NULL,
+  `category` varchar(255) DEFAULT NULL,
+  `view` int(11) unsigned DEFAULT NULL,
+  `comments` int(11) unsigned DEFAULT NULL,
+  `copyright` int(1) unsigned DEFAULT NULL,
+  PRIMARY KEY (`key`)
+) ENGINE=InnoDB AUTO_INCREMENT=0 DEFAULT CHARSET=utf8;
+
+
+</code></pre>
+
+<hr>
+
+<p><strong>Processor是爬虫逻辑，程序的核心</strong></p>
+
+<div class="highlight highlight-source-java"><pre><span class="pl-k">package</span> <span class="pl-smi">csdnblog</span>;
+
+<span class="pl-k">import</span> <span class="pl-smi">java.util.List</span>;
+
+<span class="pl-k">import</span> <span class="pl-smi">us.codecraft.webmagic.Page</span>;
+<span class="pl-k">import</span> <span class="pl-smi">us.codecraft.webmagic.Site</span>;
+<span class="pl-k">import</span> <span class="pl-smi">us.codecraft.webmagic.Spider</span>;
+<span class="pl-k">import</span> <span class="pl-smi">us.codecraft.webmagic.processor.PageProcessor</span>;
+
+<span class="pl-c">/**</span>
+<span class="pl-c"> * CSDN博客爬虫</span>
+<span class="pl-c"> * </span>
+<span class="pl-c"> * @describe 可以爬取指定用户的csdn博客所有文章，并保存到数据库中。</span>
+<span class="pl-c"> * @date 2016-4-30</span>
+<span class="pl-c"> * </span>
+<span class="pl-c"> * @author steven</span>
+<span class="pl-c"> * @csdn qq598535550</span>
+<span class="pl-c"> * @website lyf.soecode.com</span>
+<span class="pl-c"> */</span>
+<span class="pl-k">public</span> <span class="pl-k">class</span> <span class="pl-en">CsdnBlogPageProcessor</span> <span class="pl-k">implements</span> <span class="pl-e">PageProcessor</span> {
+
+    <span class="pl-k">private</span> <span class="pl-k">static</span> <span class="pl-smi">String</span> username <span class="pl-k">=</span> <span class="pl-s"><span class="pl-pds">"</span>qq598535550<span class="pl-pds">"</span></span>;<span class="pl-c">// 设置csdn用户名</span>
+    <span class="pl-k">private</span> <span class="pl-k">static</span> <span class="pl-k">int</span> size <span class="pl-k">=</span> <span class="pl-c1">0</span>;<span class="pl-c">// 共抓取到的文章数量</span>
+
+    <span class="pl-c">// 抓取网站的相关配置，包括：编码、抓取间隔、重试次数等</span>
+    <span class="pl-k">private</span> <span class="pl-smi">Site</span> site <span class="pl-k">=</span> <span class="pl-smi">Site</span><span class="pl-k">.</span>me()<span class="pl-k">.</span>setRetryTimes(<span class="pl-c1">3</span>)<span class="pl-k">.</span>setSleepTime(<span class="pl-c1">1000</span>);
+
+    <span class="pl-k">@Override</span>
+    <span class="pl-k">public</span> <span class="pl-smi">Site</span> <span class="pl-en">getSite</span>() {
+        <span class="pl-k">return</span> site;
+    }
+
+    <span class="pl-k">@Override</span>
+    <span class="pl-c">// process是定制爬虫逻辑的核心接口，在这里编写抽取逻辑</span>
+    <span class="pl-k">public</span> <span class="pl-k">void</span> <span class="pl-en">process</span>(<span class="pl-smi">Page</span> <span class="pl-v">page</span>) {
+        <span class="pl-c">// 列表页</span>
+        <span class="pl-k">if</span> (<span class="pl-k">!</span>page<span class="pl-k">.</span>getUrl()<span class="pl-k">.</span>regex(<span class="pl-s"><span class="pl-pds">"</span>http://blog<span class="pl-cce">\\</span>.csdn<span class="pl-cce">\\</span>.net/<span class="pl-pds">"</span></span> <span class="pl-k">+</span> username <span class="pl-k">+</span> <span class="pl-s"><span class="pl-pds">"</span>/article/details/<span class="pl-cce">\\</span>d+<span class="pl-pds">"</span></span>)<span class="pl-k">.</span>match()) {
+            <span class="pl-c">// 添加所有文章页</span>
+            page<span class="pl-k">.</span>addTargetRequests(page<span class="pl-k">.</span>getHtml()<span class="pl-k">.</span>xpath(<span class="pl-s"><span class="pl-pds">"</span>//div[@id='article_list']<span class="pl-pds">"</span></span>)<span class="pl-k">.</span>links()<span class="pl-c">// 限定文章列表获取区域</span>
+                    .regex(<span class="pl-s"><span class="pl-pds">"</span>/<span class="pl-pds">"</span></span> <span class="pl-k">+</span> username <span class="pl-k">+</span> <span class="pl-s"><span class="pl-pds">"</span>/article/details/<span class="pl-cce">\\</span>d+<span class="pl-pds">"</span></span>)
+                    .replace(<span class="pl-s"><span class="pl-pds">"</span>/<span class="pl-pds">"</span></span> <span class="pl-k">+</span> username <span class="pl-k">+</span> <span class="pl-s"><span class="pl-pds">"</span>/<span class="pl-pds">"</span></span>, <span class="pl-s"><span class="pl-pds">"</span>http://blog.csdn.net/<span class="pl-pds">"</span></span> <span class="pl-k">+</span> username <span class="pl-k">+</span> <span class="pl-s"><span class="pl-pds">"</span>/<span class="pl-pds">"</span></span>)<span class="pl-c">// 巧用替换给把相对url转换成绝对url</span>
+                    .all());
+            <span class="pl-c">// 添加其他列表页</span>
+            page<span class="pl-k">.</span>addTargetRequests(page<span class="pl-k">.</span>getHtml()<span class="pl-k">.</span>xpath(<span class="pl-s"><span class="pl-pds">"</span>//div[@id='papelist']<span class="pl-pds">"</span></span>)<span class="pl-k">.</span>links()<span class="pl-c">// 限定其他列表页获取区域</span>
+                    .regex(<span class="pl-s"><span class="pl-pds">"</span>/<span class="pl-pds">"</span></span> <span class="pl-k">+</span> username <span class="pl-k">+</span> <span class="pl-s"><span class="pl-pds">"</span>/article/list/<span class="pl-cce">\\</span>d+<span class="pl-pds">"</span></span>)
+                    .replace(<span class="pl-s"><span class="pl-pds">"</span>/<span class="pl-pds">"</span></span> <span class="pl-k">+</span> username <span class="pl-k">+</span> <span class="pl-s"><span class="pl-pds">"</span>/<span class="pl-pds">"</span></span>, <span class="pl-s"><span class="pl-pds">"</span>http://blog.csdn.net/<span class="pl-pds">"</span></span> <span class="pl-k">+</span> username <span class="pl-k">+</span> <span class="pl-s"><span class="pl-pds">"</span>/<span class="pl-pds">"</span></span>)<span class="pl-c">// 巧用替换给把相对url转换成绝对url</span>
+                    .all());
+            <span class="pl-c">// 文章页</span>
+        } <span class="pl-k">else</span> {
+            size<span class="pl-k">++</span>;<span class="pl-c">// 文章数量加1</span>
+            <span class="pl-c">// 用CsdnBlog类来存抓取到的数据，方便存入数据库</span>
+            <span class="pl-smi">CsdnBlog</span> csdnBlog <span class="pl-k">=</span> <span class="pl-k">new</span> <span class="pl-smi">CsdnBlog</span>();
+            <span class="pl-c">// 设置标签（可以有多个，用,来分割）</span>
+            csdnBlog<span class="pl-k">.</span>setTags(listToString(page<span class="pl-k">.</span>getHtml()
+                    .xpath(<span class="pl-s"><span class="pl-pds">"</span>//div[@class='article_l']/span[@class='link_categories']/a/allText()<span class="pl-pds">"</span></span>)<span class="pl-k">.</span>all()));
+            <span class="pl-c">// 设置类别（可以有多个，用,来分割）</span>
+                    page<span class="pl-k">.</span>getHtml()<span class="pl-k">.</span>xpath(<span class="pl-s"><span class="pl-pds">"</span>//div[@class='article_title']//span[@class='link_title']/a/text()<span class="pl-pds">"</span></span>)<span class="pl-k">.</span>get());
+            <span class="pl-c">// 设置日期</span>
+            csdnBlog<span class="pl-k">.</span>setDate(
+                    page<span class="pl-k">.</span>getHtml()<span class="pl-k">.</span>xpath(<span class="pl-s"><span class="pl-pds">"</span>//div[@class='article_r']/span[@class='link_postdate']/text()<span class="pl-pds">"</span></span>)<span class="pl-k">.</span>get());
+            <span class="pl-c">// 设置标签组（标签可以有多个，这里用,来分割）</span>
+            csdnBlog<span class="pl-k">.</span>setTags(listToString(page<span class="pl-k">.</span>getHtml()
+                    .xpath(<span class="pl-s"><span class="pl-pds">"</span>//div[@class='article_l']/span[@class='link_categories']/a/allText()<span class="pl-pds">"</span></span>)<span class="pl-k">.</span>all()));
+            <span class="pl-c">// 设置类别</span>
+            csdnBlog<span class="pl-k">.</span>setCategory(
+                    listToString(page<span class="pl-k">.</span>getHtml()<span class="pl-k">.</span>xpath(<span class="pl-s"><span class="pl-pds">"</span>//div[@class='category_r']/label/span/text()<span class="pl-pds">"</span></span>)<span class="pl-k">.</span>all()));
+            <span class="pl-c">// 设置阅读人数</span>
+            csdnBlog<span class="pl-k">.</span>setView(<span class="pl-smi">Integer</span><span class="pl-k">.</span>parseInt(page<span class="pl-k">.</span>getHtml()<span class="pl-k">.</span>xpath(<span class="pl-s"><span class="pl-pds">"</span>//div[@class='article_r']/span[@class='link_view']<span class="pl-pds">"</span></span>)
+                    .regex(<span class="pl-s"><span class="pl-pds">"</span>(<span class="pl-cce">\\</span>d+)人阅读<span class="pl-pds">"</span></span>)<span class="pl-k">.</span>get()));
+            <span class="pl-c">// 设置评论人数</span>
+            csdnBlog<span class="pl-k">.</span>setComments(<span class="pl-smi">Integer</span><span class="pl-k">.</span>parseInt(page<span class="pl-k">.</span>getHtml()
+                    .xpath(<span class="pl-s"><span class="pl-pds">"</span>//div[@class='article_r']/span[@class='link_comments']<span class="pl-pds">"</span></span>)<span class="pl-k">.</span>regex(<span class="pl-s"><span class="pl-pds">"</span><span class="pl-cce">\\</span>((<span class="pl-cce">\\</span>d+)<span class="pl-cce">\\</span>)<span class="pl-pds">"</span></span>)<span class="pl-k">.</span>get()));
+            <span class="pl-c">// 设置是否原创</span>
+            csdnBlog<span class="pl-k">.</span>setCopyright(page<span class="pl-k">.</span>getHtml()<span class="pl-k">.</span>regex(<span class="pl-s"><span class="pl-pds">"</span>bog_copyright<span class="pl-pds">"</span></span>)<span class="pl-k">.</span>match() <span class="pl-k">?</span> <span class="pl-c1">1</span> <span class="pl-k">:</span> <span class="pl-c1">0</span>);
+            <span class="pl-c">// 把对象存入数据库</span>
+            <span class="pl-k">new</span> <span class="pl-smi">CsdnBlogDao</span>()<span class="pl-k">.</span>add(csdnBlog);
+            <span class="pl-c">// 把对象输出控制台</span>
+            <span class="pl-smi">System</span><span class="pl-k">.</span>out<span class="pl-k">.</span>println(csdnBlog);
+        }
+    }
+
+    <span class="pl-c">// 把list转换为string，用,分割</span>
+    <span class="pl-k">public</span> <span class="pl-k">static</span> <span class="pl-smi">String</span> <span class="pl-en">listToString</span>(<span class="pl-k">List&lt;<span class="pl-smi">String</span>&gt;</span> <span class="pl-v">stringList</span>) {
+        <span class="pl-k">if</span> (stringList <span class="pl-k">==</span> <span class="pl-c1">null</span>) {
+            <span class="pl-k">return</span> <span class="pl-c1">null</span>;
+        }
+        <span class="pl-smi">StringBuilder</span> result <span class="pl-k">=</span> <span class="pl-k">new</span> <span class="pl-smi">StringBuilder</span>();
+        <span class="pl-k">boolean</span> flag <span class="pl-k">=</span> <span class="pl-c1">false</span>;
+        <span class="pl-k">for</span> (<span class="pl-smi">String</span> string <span class="pl-k">:</span> stringList) {
+            <span class="pl-k">if</span> (flag) {
+                result<span class="pl-k">.</span>append(<span class="pl-s"><span class="pl-pds">"</span>,<span class="pl-pds">"</span></span>);
+            } <span class="pl-k">else</span> {
+                flag <span class="pl-k">=</span> <span class="pl-c1">true</span>;
+            }
+            result<span class="pl-k">.</span>append(string);
+        }
+        <span class="pl-k">return</span> result<span class="pl-k">.</span>toString();
+    }
+
+    <span class="pl-k">public</span> <span class="pl-k">static</span> <span class="pl-k">void</span> <span class="pl-en">main</span>(<span class="pl-k">String</span>[] <span class="pl-v">args</span>) {
+        <span class="pl-k">long</span> startTime, endTime;
+        <span class="pl-smi">System</span><span class="pl-k">.</span>out<span class="pl-k">.</span>println(<span class="pl-s"><span class="pl-pds">"</span>【爬虫开始】请耐心等待一大波数据到你碗里来...<span class="pl-pds">"</span></span>);
+        startTime <span class="pl-k">=</span> <span class="pl-smi">System</span><span class="pl-k">.</span>currentTimeMillis();
+        <span class="pl-c">// 从用户博客首页开始抓，开启5个线程，启动爬虫</span>
+        <span class="pl-smi">Spider</span><span class="pl-k">.</span>create(<span class="pl-k">new</span> <span class="pl-smi">CsdnBlogPageProcessor</span>())<span class="pl-k">.</span>addUrl(<span class="pl-s"><span class="pl-pds">"</span>http://blog.csdn.net/<span class="pl-pds">"</span></span> <span class="pl-k">+</span> username)<span class="pl-k">.</span>thread(<span class="pl-c1">5</span>)<span class="pl-k">.</span>run();
+        endTime <span class="pl-k">=</span> <span class="pl-smi">System</span><span class="pl-k">.</span>currentTimeMillis();
+        <span class="pl-smi">System</span><span class="pl-k">.</span>out<span class="pl-k">.</span>println(<span class="pl-s"><span class="pl-pds">"</span>【爬虫结束】共抓取<span class="pl-pds">"</span></span> <span class="pl-k">+</span> size <span class="pl-k">+</span> <span class="pl-s"><span class="pl-pds">"</span>篇文章，耗时约<span class="pl-pds">"</span></span> <span class="pl-k">+</span> ((endTime <span class="pl-k">-</span> startTime) <span class="pl-k">/</span> <span class="pl-c1">1000</span>) <span class="pl-k">+</span> <span class="pl-s"><span class="pl-pds">"</span>秒，已保存到数据库，请查收！<span class="pl-pds">"</span></span>);
+    }
+}
+</pre></div>
+
+<hr>
+
+<p><strong>CsdnBlog实体类对应数据库的表</strong></p>
+
+<div class="highlight highlight-source-java"><pre><span class="pl-k">package</span> <span class="pl-smi">csdnblog</span>;
+
+<span class="pl-k">public</span> <span class="pl-k">class</span> <span class="pl-en">CsdnBlog</span> {
+
+    <span class="pl-k">private</span> <span class="pl-k">int</span> id;<span class="pl-c">// 编号</span>
+
+    <span class="pl-k">private</span> <span class="pl-smi">String</span> title;<span class="pl-c">// 标题</span>
+
+    <span class="pl-k">private</span> <span class="pl-smi">String</span> date;<span class="pl-c">// 日期</span>
+
+    <span class="pl-k">private</span> <span class="pl-smi">String</span> tags;<span class="pl-c">// 标签</span>
+
+    <span class="pl-k">private</span> <span class="pl-smi">String</span> category;<span class="pl-c">// 分类</span>
+
+    <span class="pl-k">private</span> <span class="pl-k">int</span> view;<span class="pl-c">// 阅读人数</span>
+
+    <span class="pl-k">private</span> <span class="pl-k">int</span> comments;<span class="pl-c">// 评论人数</span>
+
+    <span class="pl-k">private</span> <span class="pl-k">int</span> copyright;<span class="pl-c">// 是否原创</span>
+
+    <span class="pl-k">public</span> <span class="pl-k">int</span> <span class="pl-en">getId</span>() {
+        <span class="pl-k">return</span> id;
+    }
+
+    <span class="pl-k">public</span> <span class="pl-k">void</span> <span class="pl-en">setId</span>(<span class="pl-k">int</span> <span class="pl-v">id</span>) {
+        <span class="pl-v">this</span><span class="pl-k">.</span>id <span class="pl-k">=</span> id;
+    }
+
+    <span class="pl-k">public</span> <span class="pl-smi">String</span> <span class="pl-en">getTitle</span>() {
+        <span class="pl-k">return</span> title;
+    }
+
+    <span class="pl-k">public</span> <span class="pl-k">void</span> <span class="pl-en">setTitle</span>(<span class="pl-smi">String</span> <span class="pl-v">title</span>) {
+        <span class="pl-v">this</span><span class="pl-k">.</span>title <span class="pl-k">=</span> title;
+    }
+
+    <span class="pl-k">public</span> <span class="pl-smi">String</span> <span class="pl-en">getDate</span>() {
+        <span class="pl-k">return</span> date;
+    }
+
+    <span class="pl-k">public</span> <span class="pl-k">void</span> <span class="pl-en">setDate</span>(<span class="pl-smi">String</span> <span class="pl-v">date</span>) {
+        <span class="pl-v">this</span><span class="pl-k">.</span>date <span class="pl-k">=</span> date;
+    }
+
+    <span class="pl-k">public</span> <span class="pl-smi">String</span> <span class="pl-en">getTags</span>() {
+        <span class="pl-k">return</span> tags;
+    }
+
+    <span class="pl-k">public</span> <span class="pl-k">void</span> <span class="pl-en">setTags</span>(<span class="pl-smi">String</span> <span class="pl-v">tags</span>) {
+        <span class="pl-v">this</span><span class="pl-k">.</span>tags <span class="pl-k">=</span> tags;
+    }
+
+    <span class="pl-k">public</span> <span class="pl-smi">String</span> <span class="pl-en">getCategory</span>() {
+        <span class="pl-k">return</span> category;
+    }
+
+    <span class="pl-k">public</span> <span class="pl-k">void</span> <span class="pl-en">setCategory</span>(<span class="pl-smi">String</span> <span class="pl-v">category</span>) {
+        <span class="pl-v">this</span><span class="pl-k">.</span>category <span class="pl-k">=</span> category;
+    }
+
+    <span class="pl-k">public</span> <span class="pl-k">int</span> <span class="pl-en">getView</span>() {
+        <span class="pl-k">return</span> view;
+    }
+
+    <span class="pl-k">public</span> <span class="pl-k">void</span> <span class="pl-en">setView</span>(<span class="pl-k">int</span> <span class="pl-v">view</span>) {
+        <span class="pl-v">this</span><span class="pl-k">.</span>view <span class="pl-k">=</span> view;
+    }
+
+    <span class="pl-k">public</span> <span class="pl-k">int</span> <span class="pl-en">getComments</span>() {
+        <span class="pl-k">return</span> comments;
+    }
+
+    <span class="pl-k">public</span> <span class="pl-k">void</span> <span class="pl-en">setComments</span>(<span class="pl-k">int</span> <span class="pl-v">comments</span>) {
+        <span class="pl-v">this</span><span class="pl-k">.</span>comments <span class="pl-k">=</span> comments;
+    }
+
+    <span class="pl-k">public</span> <span class="pl-k">int</span> <span class="pl-en">getCopyright</span>() {
+        <span class="pl-k">return</span> copyright;
+    }
+
+    <span class="pl-k">public</span> <span class="pl-k">void</span> <span class="pl-en">setCopyright</span>(<span class="pl-k">int</span> <span class="pl-v">copyright</span>) {
+        <span class="pl-v">this</span><span class="pl-k">.</span>copyright <span class="pl-k">=</span> copyright;
+    }
+
+    <span class="pl-k">@Override</span>
+    <span class="pl-k">public</span> <span class="pl-smi">String</span> <span class="pl-en">toString</span>() {
+        <span class="pl-k">return</span> <span class="pl-s"><span class="pl-pds">"</span>CsdnBlog [id=<span class="pl-pds">"</span></span> <span class="pl-k">+</span> id <span class="pl-k">+</span> <span class="pl-s"><span class="pl-pds">"</span>, title=<span class="pl-pds">"</span></span> <span class="pl-k">+</span> title <span class="pl-k">+</span> <span class="pl-s"><span class="pl-pds">"</span>, date=<span class="pl-pds">"</span></span> <span class="pl-k">+</span> date <span class="pl-k">+</span> <span class="pl-s"><span class="pl-pds">"</span>, tags=<span class="pl-pds">"</span></span> <span class="pl-k">+</span> tags <span class="pl-k">+</span> <span class="pl-s"><span class="pl-pds">"</span>, category=<span class="pl-pds">"</span></span>
+                <span class="pl-k">+</span> category <span class="pl-k">+</span> <span class="pl-s"><span class="pl-pds">"</span>, view=<span class="pl-pds">"</span></span> <span class="pl-k">+</span> view <span class="pl-k">+</span> <span class="pl-s"><span class="pl-pds">"</span>, comments=<span class="pl-pds">"</span></span> <span class="pl-k">+</span> comments <span class="pl-k">+</span> <span class="pl-s"><span class="pl-pds">"</span>, copyright=<span class="pl-pds">"</span></span> <span class="pl-k">+</span> copyright <span class="pl-k">+</span> <span class="pl-s"><span class="pl-pds">"</span>]<span class="pl-pds">"</span></span>;
+    }
+
+}
+</pre></div>
+
+<hr>
+
+<p><strong>dao数据访问层</strong></p>
+
+<div class="highlight highlight-source-java"><pre><span class="pl-k">package</span> <span class="pl-smi">csdnblog</span>;
+
+<span class="pl-k">import</span> <span class="pl-smi">java.sql.Connection</span>;
+<span class="pl-k">import</span> <span class="pl-smi">java.sql.DriverManager</span>;
+<span class="pl-k">import</span> <span class="pl-smi">java.sql.PreparedStatement</span>;
+<span class="pl-k">import</span> <span class="pl-smi">java.sql.ResultSet</span>;
+<span class="pl-k">import</span> <span class="pl-smi">java.sql.SQLException</span>;
+<span class="pl-k">import</span> <span class="pl-smi">java.sql.Statement</span>;
+
+<span class="pl-k">public</span> <span class="pl-k">class</span> <span class="pl-en">CsdnBlogDao</span> {
+
+    <span class="pl-k">private</span> <span class="pl-smi">Connection</span> conn <span class="pl-k">=</span> <span class="pl-c1">null</span>;
+    <span class="pl-k">private</span> <span class="pl-smi">Statement</span> stmt <span class="pl-k">=</span> <span class="pl-c1">null</span>;
+
+    <span class="pl-k">public</span> <span class="pl-en">CsdnBlogDao</span>() {
+        <span class="pl-k">try</span> {
+            <span class="pl-smi">Class</span><span class="pl-k">.</span>forName(<span class="pl-s"><span class="pl-pds">"</span>com.mysql.jdbc.Driver<span class="pl-pds">"</span></span>);
+            <span class="pl-smi">String</span> url <span class="pl-k">=</span> <span class="pl-s"><span class="pl-pds">"</span>jdbc:mysql://localhost:3307/webmagic?user=root&amp;password=<span class="pl-pds">"</span></span>;
+            conn <span class="pl-k">=</span> <span class="pl-smi">DriverManager</span><span class="pl-k">.</span>getConnection(url);
+            stmt <span class="pl-k">=</span> conn<span class="pl-k">.</span>createStatement();
+        } <span class="pl-k">catch</span> (<span class="pl-smi">ClassNotFoundException</span> e) {
+            e<span class="pl-k">.</span>printStackTrace();
+        } <span class="pl-k">catch</span> (<span class="pl-smi">SQLException</span> e) {
+            e<span class="pl-k">.</span>printStackTrace();
+        }
+
+    }
+
+    <span class="pl-k">public</span> <span class="pl-k">int</span> <span class="pl-en">add</span>(<span class="pl-smi">CsdnBlog</span> <span class="pl-v">csdnBlog</span>) {
+        <span class="pl-k">try</span> {
+            <span class="pl-smi">String</span> sql <span class="pl-k">=</span> <span class="pl-s"><span class="pl-pds">"</span>INSERT INTO `webmagic`.`csdnblog` (`id`, `title`, `date`, `tags`, `category`, `view`, `comments`, `copyright`) VALUES (?, ?, ?, ?, ?, ?, ?, ?);<span class="pl-pds">"</span></span>;
+            <span class="pl-smi">PreparedStatement</span> ps <span class="pl-k">=</span> conn<span class="pl-k">.</span>prepareStatement(sql);
+            ps<span class="pl-k">.</span>setInt(<span class="pl-c1">1</span>, csdnBlog<span class="pl-k">.</span>getId());
+            ps<span class="pl-k">.</span>setString(<span class="pl-c1">2</span>, csdnBlog<span class="pl-k">.</span>getTitle());
+            ps<span class="pl-k">.</span>setString(<span class="pl-c1">3</span>, csdnBlog<span class="pl-k">.</span>getDate());
+            ps<span class="pl-k">.</span>setString(<span class="pl-c1">4</span>, csdnBlog<span class="pl-k">.</span>getTags());
+            ps<span class="pl-k">.</span>setString(<span class="pl-c1">5</span>, csdnBlog<span class="pl-k">.</span>getCategory());
+            ps<span class="pl-k">.</span>setInt(<span class="pl-c1">6</span>, csdnBlog<span class="pl-k">.</span>getView());
+            ps<span class="pl-k">.</span>setInt(<span class="pl-c1">7</span>, csdnBlog<span class="pl-k">.</span>getComments());
+            ps<span class="pl-k">.</span>setInt(<span class="pl-c1">8</span>, csdnBlog<span class="pl-k">.</span>getCopyright());
+            <span class="pl-k">return</span> ps<span class="pl-k">.</span>executeUpdate();
+        } <span class="pl-k">catch</span> (<span class="pl-smi">SQLException</span> e) {
+            e<span class="pl-k">.</span>printStackTrace();
+        }
+        <span class="pl-k">return</span> <span class="pl-k">-</span><span class="pl-c1">1</span>;
+    }
+
+}
+</pre></div>
+
+<hr>
+
+<p>大家看一下我的博客爬到的结果，有点小激动哈~大家也可以动手试试~~</p>
+
+<p><img src="http://img.blog.csdn.net/20160430201909414" alt="控制台输出结果"></p>
+
+<p><img src="http://img.blog.csdn.net/20160430201759742" alt="爬虫结果"></p>
+
+      <footer class="site-footer">
+        <span class="site-footer-owner"><a href="https://github.com/liyifeng1994/webmagic-csdnblog">webmagic-csdnblog</a> is maintained by <a href="https://github.com/liyifeng1994">liyifeng1994</a>.</span>
+
+        <span class="site-footer-credits">This page was generated by <a href="https://pages.github.com">GitHub Pages</a> using the <a href="https://github.com/jasonlong/cayman-theme">Cayman theme</a> by <a href="https://twitter.com/jasonlong">Jason Long</a>.</span>
+      </footer>
+
+    </section>
+
+  
+  </body>
+</html>
