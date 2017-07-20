@@ -1,5 +1,4 @@
-# webmagic-csdnblog
-基于WebMagic写的一个csdn博客小爬虫
+# wedddddddddddddddddddddddddddddddddddddddd虫ttttttttttttttttttttttttttttt
 
 博客地址：
 [http://blog.csdn.net/qq598535550/article/details/51287630](http://blog.csdn.net/qq598535550/article/details/51287630)
